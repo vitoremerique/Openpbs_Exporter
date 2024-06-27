@@ -85,6 +85,10 @@ var (
 		Name: "openpbs_cpu_available_unit",
 		Help: "Total cpu available in the OpenPBS cluster.",
 	})
+	cpuTotal = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "openpbs_cpu_total",
+		Help: "Total cpu in the OpenPBS cluster.",
+	})
 )
 
 func init() {
@@ -105,6 +109,7 @@ func init() {
 	prometheus.MustRegister(memAvailable)
 	prometheus.MustRegister(cpuUsage)
 	prometheus.MustRegister(cpuAvailable)
+	prometheus.MustRegister(cpuTotal)
 }
 
 func collectMetrics() {
@@ -126,6 +131,7 @@ func collectMetrics() {
 	collectMemoryAvailable(out)
 	collectCPUAssigned(out)
 	collectCPUAvailable(out)
+	collectCPUTotal(out)
 
 	nodesInfo := string(out)
 	nodeCount.Set(float64(strings.Count(nodesInfo, "Mom =")))
@@ -321,6 +327,34 @@ func collectCPUAssigned(output []byte) {
 	}
 
 	cpuUsage.Set(float64(totalCPUs))
+}
+
+func collectCPUTotal(output []byte) {
+	totalCPUs := int64(0)
+
+	// Cria um scanner para ler a saída linha por linha
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+
+	re := regexp.MustCompile(`pcpus = (\d+)`)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		match := re.FindStringSubmatch(line)
+		if match != nil {
+			cpuValue, err := strconv.ParseInt(match[1], 10, 64)
+			if err != nil {
+				fmt.Println("Erro ao converter valor de CPU:", err)
+				continue
+			}
+			totalCPUs += cpuValue
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Println("Erro ao ler a saída:", err)
+	}
+
+	cpuTotal.Set(float64(totalCPUs))
 }
 
 func main() {
