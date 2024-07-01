@@ -32,7 +32,6 @@ var (
 		Name: "openpbs_node_down",
 		Help: "Number of down nodes",
 	})
-
 	nodeBusy = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "openpbs_node_busy",
 		Help: "Number of busy nodes",
@@ -79,16 +78,25 @@ var (
 	})
 	cpuUsage = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "openpbs_cpu_assigned_unit",
-		Help: "Total cpu usage in the OpenPBS cluster.",
+		Help: "Total CPU usage in the OpenPBS cluster.",
 	})
 	cpuAvailable = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "openpbs_cpu_available_unit",
-		Help: "Total cpu available in the OpenPBS cluster.",
+		Help: "Total CPU available in the OpenPBS cluster.",
 	})
 	cpuTotal = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "openpbs_cpu_total",
-		Help: "Total cpu in the OpenPBS cluster.",
+		Help: "Total CPU in the OpenPBS cluster.",
 	})
+
+	userMemUsage = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "openpbs_user_memory_usage_gb",
+		Help: "Memory usage per user in the OpenPBS cluster in GB.",
+	}, []string{"user"})
+	userCpuUsage = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "openpbs_user_cpu_usage",
+		Help: "CPU usage per user in the OpenPBS cluster.",
+	}, []string{"user"})
 )
 
 func init() {
@@ -110,6 +118,8 @@ func init() {
 	prometheus.MustRegister(cpuUsage)
 	prometheus.MustRegister(cpuAvailable)
 	prometheus.MustRegister(cpuTotal)
+	prometheus.MustRegister(userMemUsage)
+	prometheus.MustRegister(userCpuUsage)
 }
 
 func collectMetrics() {
@@ -150,6 +160,15 @@ func collectMetrics() {
 		return
 	}
 	parseJobStatesCountperStatus(out)
+
+	// Collect user memory and CPU usage separately
+	out, err = exec.Command("bash", "-c", "qstat -f").Output()
+	if err != nil {
+		log.Printf("Error collecting detailed job information: %v", err)
+		return
+	}
+	collectUserMemoryUsage(out)
+	collectUserCPUUsage(out)
 }
 
 func parseOutput(output []byte) float64 {
@@ -236,8 +255,7 @@ func collectMemoryAvailable(output []byte) {
 	// Cria um scanner para ler a saída linha por linha
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 
-	// Expressão regular para encontrar linhas com `resources_available.mem`
-	re := regexp.MustCompile(`resources_available.mem = (\d+)(\w+)`)
+	re := regexp.MustCompile(`resources_available\.mem = (\d+)(\w+)`)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -273,36 +291,8 @@ func collectMemoryAvailable(output []byte) {
 	memAvailable.Set(float64(totalMem))
 }
 
-func collectCPUAvailable(output []byte) {
-	totalCPUs := int64(0)
-
-	// Cria um scanner para ler a saída linha por linha
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
-
-	re := regexp.MustCompile(`resources_available\.ncpus = (\d+)`)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		match := re.FindStringSubmatch(line)
-		if match != nil {
-			cpuValue, err := strconv.ParseInt(match[1], 10, 64)
-			if err != nil {
-				fmt.Println("Erro ao converter valor de CPU:", err)
-				continue
-			}
-			totalCPUs += cpuValue
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		fmt.Println("Erro ao ler a saída:", err)
-	}
-
-	cpuAvailable.Set(float64(totalCPUs))
-}
-
 func collectCPUAssigned(output []byte) {
-	totalCPUs := int64(0)
+	totalCPU := int64(0)
 
 	// Cria um scanner para ler a saída linha por linha
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
@@ -318,7 +308,7 @@ func collectCPUAssigned(output []byte) {
 				fmt.Println("Erro ao converter valor de CPU:", err)
 				continue
 			}
-			totalCPUs += cpuValue
+			totalCPU += cpuValue
 		}
 	}
 
@@ -326,16 +316,16 @@ func collectCPUAssigned(output []byte) {
 		fmt.Println("Erro ao ler a saída:", err)
 	}
 
-	cpuUsage.Set(float64(totalCPUs))
+	cpuUsage.Set(float64(totalCPU))
 }
 
-func collectCPUTotal(output []byte) {
-	totalCPUs := int64(0)
+func collectCPUAvailable(output []byte) {
+	totalCPU := int64(0)
 
 	// Cria um scanner para ler a saída linha por linha
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 
-	re := regexp.MustCompile(`pcpus = (\d+)`)
+	re := regexp.MustCompile(`resources_available\.ncpus = (\d+)`)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -346,7 +336,7 @@ func collectCPUTotal(output []byte) {
 				fmt.Println("Erro ao converter valor de CPU:", err)
 				continue
 			}
-			totalCPUs += cpuValue
+			totalCPU += cpuValue
 		}
 	}
 
@@ -354,17 +344,147 @@ func collectCPUTotal(output []byte) {
 		fmt.Println("Erro ao ler a saída:", err)
 	}
 
-	cpuTotal.Set(float64(totalCPUs))
+	cpuAvailable.Set(float64(totalCPU))
+}
+
+func collectCPUTotal(output []byte) {
+	totalCPU := int64(0)
+
+	// Cria um scanner para ler a saída linha por linha
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+
+	re := regexp.MustCompile(`resources_available\.ncpus = (\d+)`)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		match := re.FindStringSubmatch(line)
+		if match != nil {
+			cpuValue, err := strconv.ParseInt(match[1], 10, 64)
+			if err != nil {
+				fmt.Println("Erro ao converter valor de CPU:", err)
+				continue
+			}
+			totalCPU += cpuValue
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Println("Erro ao ler a saída:", err)
+	}
+
+	cpuTotal.Set(float64(totalCPU))
+}
+
+func collectUserMemoryUsage(output []byte) {
+	userMem := make(map[string]float64)
+
+	// Cria um scanner para ler a saída linha por linha
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+
+	// Expressões regulares para encontrar linhas relevantes
+	memRe := regexp.MustCompile(`resources_used\.mem = (\d+)(\w+)`)
+	userRe := regexp.MustCompile(`Job_Owner = ([^/]+)`)
+	var currentUser string
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Encontrar o usuário atual
+		userMatch := userRe.FindStringSubmatch(line)
+		if userMatch != nil {
+			currentUser = userMatch[1]
+		}
+
+		// Encontrar uso de memória para o usuário atual
+		memMatch := memRe.FindStringSubmatch(line)
+		if memMatch != nil {
+			memValue, err := strconv.ParseInt(memMatch[1], 10, 64)
+			if err != nil {
+				fmt.Println("Erro ao converter valor de memória:", err)
+				continue
+			}
+			unit := memMatch[2]
+
+			// Converte o valor para GB
+			switch unit {
+			case "kb":
+				userMem[currentUser] += float64(memValue) / (1024 * 1024)
+			case "mb":
+				userMem[currentUser] += float64(memValue) / 1024
+			case "gb":
+				userMem[currentUser] += float64(memValue)
+			case "tb":
+				userMem[currentUser] += float64(memValue) * 1024
+			default:
+				fmt.Println("Unidade desconhecida:", unit)
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Println("Erro ao ler a saída:", err)
+	}
+
+	// Atualiza as métricas Prometheus para uso de memória por usuário
+	userMemUsage.Reset()
+	for user, usage := range userMem {
+		userMemUsage.WithLabelValues(user).Set(usage)
+	}
+}
+
+func collectUserCPUUsage(output []byte) {
+	userCpu := make(map[string]float64)
+
+	// Cria um scanner para ler a saída linha por linha
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+
+	// Expressões regulares para encontrar linhas relevantes
+	cpuRe := regexp.MustCompile(`resources_used\.ncpus = (\d+)`)
+	userRe := regexp.MustCompile(`Job_Owner = ([^/]+)`)
+	var currentUser string
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Encontrar o usuário atual
+		userMatch := userRe.FindStringSubmatch(line)
+		if userMatch != nil {
+			currentUser = userMatch[1]
+		}
+
+		// Encontrar uso de CPU para o usuário atual
+		cpuMatch := cpuRe.FindStringSubmatch(line)
+		if cpuMatch != nil {
+			cpuValue, err := strconv.ParseInt(cpuMatch[1], 10, 64)
+			if err != nil {
+				fmt.Println("Erro ao converter valor de CPU:", err)
+				continue
+			}
+			userCpu[currentUser] += float64(cpuValue)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Println("Erro ao ler a saída:", err)
+	}
+
+	// Atualiza as métricas Prometheus para uso de CPU por usuário
+	userCpuUsage.Reset()
+	for user, usage := range userCpu {
+		userCpuUsage.WithLabelValues(user).Set(usage)
+	}
 }
 
 func main() {
+	// Configura a função para coletar métricas em intervalos regulares
 	go func() {
 		for {
 			collectMetrics()
-			time.Sleep(10 * time.Second) // Collect metrics every 10 seconds
+			time.Sleep(5 * time.Second)
 		}
 	}()
 
+	// Configura o servidor HTTP para expor as métricas
 	http.Handle("/metrics", promhttp.Handler())
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
