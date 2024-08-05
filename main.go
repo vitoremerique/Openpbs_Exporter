@@ -153,7 +153,6 @@ func collectMetrics() {
 	nodeDrained.Set(float64(strings.Count(nodesInfo, "state = draining")))
 	nodeunknown.Set(float64(strings.Count(nodesInfo, "state = state-unknown,down")))
 
-	// Collect job states
 	out, err = exec.Command("bash", "-c", "qstat -a | tail -n +6 | awk '{print $10}' | sort | uniq -c").Output()
 	if err != nil {
 		log.Printf("Error collecting job states: %v", err)
@@ -161,7 +160,6 @@ func collectMetrics() {
 	}
 	parseJobStatesCountperStatus(out)
 
-	// Collect user memory and CPU usage separately
 	out, err = exec.Command("bash", "-c", "qstat -f").Output()
 	if err != nil {
 		log.Printf("Error collecting detailed job information: %v", err)
@@ -213,7 +211,7 @@ func collectMemoryUsage(output []byte) {
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 
 	// Expressão regular para encontrar linhas com `resources_assigned.mem`
-	re := regexp.MustCompile(`resources_assigned\.mem = (\d+)(\w+)`)
+	re := regexp.MustCompile(`resources_assigned\.mem = (\d+)([a-zA-Z]+)`)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -255,7 +253,7 @@ func collectMemoryAvailable(output []byte) {
 	// Cria um scanner para ler a saída linha por linha
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 
-	re := regexp.MustCompile(`resources_available\.mem = (\d+)(\w+)`)
+	re := regexp.MustCompile(`resources_available\.mem = (\d+)([a-zA-Z]+)`)
 
 	for scanner.Scan() {
 		line := scanner.Text()
