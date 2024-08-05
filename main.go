@@ -123,15 +123,14 @@ func init() {
 }
 
 func collectMetrics() {
-	// Collect job count
+
 	out, err := exec.Command("bash", "-c", "qstat | wc -l").Output()
 	if err != nil {
 		log.Printf("Error collecting job count: %v", err)
 		return
 	}
-	jobCount.Set(parseOutput(out) - 2) // Subtract header lines
+	jobCount.Set(parseOutput(out) - 2)
 
-	// Collect node information
 	out, err = exec.Command("bash", "-c", "pbsnodes -a").Output()
 	if err != nil {
 		log.Printf("Error collecting node information: %v", err)
